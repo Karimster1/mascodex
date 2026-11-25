@@ -28,7 +28,7 @@ const norm = p => {
   const { photo, gallery, ...r } = p;
   r.photos = p.photos || [photo, ...(gallery || [])].filter(Boolean);
   r.cover = Math.min(Math.max(0, p.cover | 0), Math.max(0, r.photos.length - 1));
-  r.mega = p.mega === true; r.friend = lvl(p.friend); r.fight = lvl(p.fight);
+  r.mega = p.mega === true; r.fav = p.fav === true; r.friend = lvl(p.friend); r.fight = lvl(p.fight);
   return r;
 };
 const DB = {
@@ -38,6 +38,16 @@ const DB = {
   putMany: ps => tx('readwrite', s => { ps.forEach(p => s.put(p)); }),
   del: id => tx('readwrite', s => s.delete(id)),
 };
+
+// Deja la mascota en la posición pos (desde 1) y numera el álbum de corrido
+async function moveTo(id, pos) {
+  const all = await DB.all(), i = all.findIndex(p => p.id === id);
+  if (i < 0) return;
+  const [p] = all.splice(i, 1);
+  all.splice(Math.min(Math.max(1, pos), all.length + 1) - 1, 0, p);
+  const changed = all.filter((x, k) => x.num !== k + 1 && (x.num = k + 1));
+  if (changed.length) await DB.putMany(changed);
+}
 
 /* ---------- Fotos ---------- */
 let urls = [];
@@ -85,25 +95,107 @@ const SPARKS = [[2, 68, 21, 1.5], [93, 2, 20, 1.0], [55, 2, 22, 2.4], [78, 98, 1
 const sparks = n => `<div class="sparks" aria-hidden="true">${SPARKS.slice(0, n).map(([x, y, z, d]) => `<i style="left:${x}%;top:${y}%;width:${z}px;height:${z}px;animation-delay:${d}s"></i>`).join('')}</div>`;
 const mini = p => {
   const s = spOf(p.species);
-  return `<button class="pet tex ${p.mega ? 'mega' : ''}" data-go="#/mascota/${esc(p.id)}" style="${skin(s)}">${p.mega ? sparks(9) : ''}<div class="ph w-${s.fam}">${picture(p)}</div><div class="pl"><span><b>${esc(p.name)}</b><small>${num(p.num)}</small></span>${glyph(s.id)}</div></button>`;
+  return `<div class="cell" data-id="${esc(p.id)}"><button class="pet tex ${p.mega ? 'mega' : ''}" data-go="#/mascota/${esc(p.id)}" style="${skin(s)}">${p.mega ? sparks(9) : ''}<div class="ph w-${s.fam}">${picture(p)}</div><div class="pl"><span><b>${esc(p.name)}</b><small>${num(p.num)}</small></span>${glyph(s.id)}</div></button></div>`;
 };
+let favOnly = false;
 let listHash = '#/'; // última lista visitada: ahí vuelve la carta
 
 /* ---------- Pantallas ---------- */
 async function typeList(sp) {
-  const s = SPECIES.find(x => x.id === sp);
+  const favs = sp === 'favoritas', s = favs ? { name: 'Favoritas' } : SPECIES.find(x => x.id === sp);
   if (!s) return go('#/tipos');
-  const pets = (await DB.all()).filter(p => p.species === sp);
-  app.innerHTML = `<div class="bar2"><button class="round" data-go="#/tipos" aria-label="Volver a Tipos">${ui('back')}</button><h1>${s.name}</h1><span class="cnt">${pets.length} ${pets.length === 1 ? 'carta' : 'cartas'}</span></div>
-    ${pets.length ? `<div class="grid">${pets.map(mini).join('')}</div>` : `<div class="empty">${glyph(sp)}<h2>Aún no tienes ninguna</h2><p>Captura la primera y aparecerá aquí.</p></div>`}
-    <button class="fab" data-go="#/nueva/${sp}">${ui('cam')}Capturar</button>`;
+  const of = (await DB.all()).filter(p => favs ? p.fav : p.species === sp), pets = favOnly && !favs ? of.filter(p => p.fav) : of;
+  const empty = favs ? ['Aún no tienes favoritas', 'Abre una carta y toca el corazón.'] : of.length ? ['Ninguna favorita aquí', 'Abre una carta y toca el corazón.'] : ['Aún no tienes ninguna', 'Captura la primera y aparecerá aquí.'];
+  app.innerHTML = `<div class="bar2"><button class="round" data-go="#/tipos" aria-label="Volver a Tipos">${ui('back')}</button><h1>${s.name}</h1><span class="cnt">${pets.length} ${pets.length === 1 ? 'carta' : 'cartas'}</span>${favs ? '' : `<button class="round fv" id="ff" aria-label="Ver solo favoritas" aria-pressed="${favOnly}">${ui('heart')}</button>`}</div>
+    ${pets.length ? `<div class="grid">${pets.map(mini).join('')}</div>` : `<div class="empty">${favs ? ui('heart') : glyph(sp)}<h2>${empty[0]}</h2><p>${empty[1]}</p></div>`}
+    ${favs ? '' : `<button class="fab" data-go="#/nueva/${sp}">${ui('cam')}Capturar</button>`}`;
+  if (!favs) $('#ff').onclick = () => { favOnly = !favOnly; render(); };
+}
+
+/* Arrastrar favoritas dentro del álbum. Se reordena con CSS order para no sacar del DOM
+   la carta que se está tocando (cancelaría el gesto). */
+function sortable(pets) {
+  const grid = $('.grid');
+  if (!grid || pets.length < 2) return;
+  const cells = $$('.cell', grid);
+  let seq = [...cells];
+  const layout = () => seq.forEach((c, k) => { c.style.order = k; });
+  cells.forEach((cell, k) => {
+    if (!pets[k].fav) return;
+    cell.classList.add('can');
+    let timer = 0, drag = null, start = null;
+    const begin = () => {
+      const r = cell.getBoundingClientRect(), ghost = cell.cloneNode(true);
+      ghost.className = 'cell ghost';
+      ghost.style.cssText = `width:${r.width}px;height:${r.height}px;left:${r.left}px;top:${r.top}px`;
+      document.body.append(ghost);
+      drag = { ghost, dx: start.x - r.left, dy: start.y - r.top, x: start.x, y: start.y, raf: 0 };
+      cell.classList.add('lift');
+      navigator.vibrate?.(30);
+      const tick = () => {
+        if (!drag) return;
+        const h = innerHeight, v = drag.y < 90 ? drag.y - 90 : drag.y > h - 120 ? drag.y - h + 120 : 0;
+        if (v) { scrollBy(0, Math.max(-14, Math.min(14, v / 5))); place(); }
+        drag.raf = requestAnimationFrame(tick);
+      };
+      tick();
+    };
+    const place = () => {
+      drag.ghost.style.left = drag.x - drag.dx + 'px'; drag.ghost.style.top = drag.y - drag.dy + 'px';
+      const over = document.elementFromPoint(drag.x, drag.y)?.closest('.cell');
+      if (!over || over === cell || over.parentNode !== grid) return;
+      const to = seq.indexOf(over);
+      seq.splice(seq.indexOf(cell), 1); seq.splice(to, 0, cell); layout();
+    };
+    const move = e => {
+      if (!start || e.pointerId !== start.id) return;
+      if (!drag) { if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) { clearTimeout(timer); stop(); } return; }
+      drag.x = e.clientX; drag.y = e.clientY; place();
+    };
+    const stop = () => {
+      clearTimeout(timer); start = null;
+      removeEventListener('pointermove', move); removeEventListener('pointerup', up); removeEventListener('pointercancel', cancel);
+    };
+    const finish = () => {
+      cancelAnimationFrame(drag.raf); drag.ghost.remove(); cell.classList.remove('lift'); drag = null;
+      // el toque que suelta la carta no debe abrirla
+      cell.dataset.dragged = '1'; setTimeout(() => delete cell.dataset.dragged, 350);
+    };
+    const up = async e => {
+      if (!start || e.pointerId !== start.id) return;
+      stop();
+      if (!drag) return;
+      finish();
+      const pos = seq.indexOf(cell) + 1;
+      if (pos - 1 === k) return;
+      try { await moveTo(pets[k].id, pos); toast(`${pets[k].name} ahora es la ${num(pos)}`); } catch { toast('No pude cambiar el número'); }
+      if (grid.isConnected) render();
+    };
+    const cancel = e => {
+      if (!start || e.pointerId !== start.id) return;
+      stop();
+      if (drag) { finish(); seq = [...cells]; layout(); }
+    };
+    cell.addEventListener('pointerdown', e => {
+      if (start || drag || e.button) return;
+      start = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      addEventListener('pointermove', move); addEventListener('pointerup', up); addEventListener('pointercancel', cancel);
+      timer = setTimeout(begin, 350);
+    });
+    cell.addEventListener('touchmove', e => { if (drag) e.preventDefault(); }, { passive: false });
+    cell.addEventListener('contextmenu', e => e.preventDefault());
+    cell.addEventListener('dragstart', e => e.preventDefault());
+    cell.addEventListener('click', e => { if (cell.dataset.dragged) { e.preventDefault(); e.stopPropagation(); } }, true);
+  });
 }
 
 async function home(tab) {
   const pets = await DB.all(), got = new Set(pets.map(p => p.species));
   let body;
+  favOnly = false;
   if (tab === 'tipos') {
-    body = Object.entries(FAMILY).map(([f, [label]]) => `<section class="fam"><h3>${label}</h3><div class="sp">${SPECIES.filter(s => s.fam === f).map(s => {
+    const favs = pets.filter(p => p.fav).length;
+    body = `<section class="fam"><button class="btn favrow" data-go="#/tipo/favoritas">${ui('heart')}<span>Favoritas</span><b>${favs}</b></button></section>` + Object.entries(FAMILY).map(([f, [label]]) => `<section class="fam"><h3>${label}</h3><div class="sp">${SPECIES.filter(s => s.fam === f).map(s => {
       const n = pets.filter(p => p.species === s.id).length;
       return `<button class="it ${n ? 'got' : 'lock'}" data-go="#/tipo/${s.id}" style="${skin(s)}">${glyph(s.id)}${s.name}${n ? ` × ${n}` : ''}</button>`;
     }).join('')}</div></section>`).join('');
@@ -116,8 +208,9 @@ async function home(tab) {
     <div class="count"><span><b>${pets.length}</b> ${pets.length === 1 ? 'mascota' : 'mascotas'}</span><span><b>${got.size}</b> de ${SPECIES.length} tipos</span></div>
     <div class="bar">${SPECIES.map(s => `<i${got.has(s.id) ? ` style="background:${s.color}"` : ''}></i>`).join('')}</div></header>
     <nav class="tabs"><button data-go="#/" class="${tab ? '' : 'on'}">Mi álbum</button><button data-go="#/tipos" class="${tab ? 'on' : ''}">Tipos</button></nav>
-    ${body}<button class="fab" data-go="#/nueva">${ui('cam')}Capturar</button>`;
+    ${!tab && pets.length > 1 && pets.some(p => p.fav) ? '<p class="hint tip">Mantén presionada una favorita y arrástrala para cambiar su número.</p>' : ''}${body}<button class="fab" data-go="#/nueva">${ui('cam')}Capturar</button>`;
   $('#cfg').onclick = settings;
+  if (!tab) sortable(pets);
 }
 
 async function detail(id) {
@@ -125,9 +218,9 @@ async function detail(id) {
   if (!p) return go('#/');
   const s = spOf(p.species);
   const fecha = new Date(p.created).toLocaleDateString('es-CL');
-  app.innerHTML = `<div class="bar2"><button class="round" data-go="${listHash}" aria-label="Volver">${ui('back')}</button><h1></h1><button class="round" data-go="#/editar/${esc(p.id)}" aria-label="Editar">${ui('edit')}</button></div>
+  app.innerHTML = `<div class="bar2"><button class="round" data-go="${listHash}" aria-label="Volver">${ui('back')}</button><h1></h1><button class="round fv" id="fv">${ui('heart')}</button><button class="round" data-go="#/editar/${esc(p.id)}" aria-label="Editar">${ui('edit')}</button></div>
     <div class="stage" style="${skin(s)}"><article class="card tex ${p.mega ? 'mega' : ''}">${sparks(38)}<div class="tag">${glyph(s.id)}</div><div class="ph w-${s.fam}" id="win"></div>
-    <div class="plate"><span class="mx">Mega Shiny EX</span><h2>${esc(p.name)}</h2>${p.desc ? `<p class="line">${esc(p.desc)}</p>` : ''}<p class="sub">${[s.name, FAMILY[s.fam][1]].filter(Boolean).join(' · ')}</p>${stats(p)}<div class="foot"><span>${num(p.num)}</span><span>${fecha}</span></div></div></article></div>
+    <div class="plate"><span class="mx">Mega Shiny EX</span><h2>${esc(p.name)}</h2>${p.desc ? `<p class="line">${esc(p.desc)}</p>` : ''}<p class="sub">${[s.name, FAMILY[s.fam][1]].filter(Boolean).join(' · ')}</p>${stats(p)}<div class="foot"><span id="nn">${num(p.num)}</span><span>${fecha}</span></div></div></article></div>
     <div class="sec"><button class="btn megab" id="mg" aria-pressed="${p.mega}">${ui('spark')}<span></span></button></div>
     <section class="sec"><h3>Fotos</h3><p class="hint" id="hint"></p><div class="photos" id="th"></div><div class="two"><button class="btn" id="c1">${ui('cam')}Tomar foto</button><button class="btn" id="c2">${ui('img')}Galería</button></div></section>`;
   const save = async () => { try { await DB.put(p); return true; } catch { toast('No pude guardar: falta espacio'); return false; } };
@@ -161,6 +254,16 @@ async function detail(id) {
   };
   paint();
   bindStars(p, save);
+  const favUI = () => {
+    $('#fv').setAttribute('aria-pressed', p.fav); $('#fv').setAttribute('aria-label', p.fav ? 'Quitar de favoritas' : 'Agregar a favoritas');
+  };
+  favUI();
+  $('#fv').onclick = async () => {
+    p.fav = !p.fav;
+    if (!await save()) p.fav = !p.fav;
+    else toast(p.fav ? 'Agregada a favoritas' : 'Quitada de favoritas');
+    favUI();
+  };
   const mg = $('#mg'), label = () => { $('span', mg).textContent = p.mega ? 'Quitar Mega Shiny EX' : 'Activar Mega Shiny EX'; mg.setAttribute('aria-pressed', p.mega); };
   label();
   mg.onclick = async () => {
@@ -268,7 +371,7 @@ async function restore(file) {
   const list = pets.map((p, k) => norm({
     id: String(p.id).replace(/[^\w-]/g, ''), num: +p.num || k + 1, species: spOf(p.species).id,
     name: String(p.name).slice(0, 24), desc: String(p.desc || '').slice(0, 300), created: +p.created || Date.now(),
-    cover: p.cover, mega: p.mega, friend: p.friend, fight: p.fight,
+    cover: p.cover, mega: p.mega, fav: p.fav, friend: p.friend, fight: p.fight,
     photos: (p.photos || [p.photo, ...(p.gallery || [])]).map(from64).filter(Boolean)
   }));
   if (!list.length || list.some(p => !p.id)) throw new Error('copia');
@@ -326,7 +429,7 @@ async function render() {
   try {
     if (a === 'mascota') await detail(id);
     else if (a === 'nueva') await editor(null, id);
-    else if (a === 'tipo') { listHash = '#/tipo/' + spOf(id).id; await typeList(id); }
+    else if (a === 'tipo') { listHash = '#/tipo/' + (id === 'favoritas' ? id : spOf(id).id); await typeList(id); }
     else if (a === 'editar') await editor(id);
     else { listHash = a === 'tipos' ? '#/tipos' : '#/'; await home(a === 'tipos' ? 'tipos' : ''); }
   } catch (e) { console.error(e); toast('Algo falló al abrir el álbum'); }
