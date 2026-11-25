@@ -127,19 +127,38 @@ async function detail(id) {
   const fecha = new Date(p.created).toLocaleDateString('es-CL');
   app.innerHTML = `<div class="bar2"><button class="round" data-go="${listHash}" aria-label="Volver">${ui('back')}</button><h1></h1><button class="round" data-go="#/editar/${esc(p.id)}" aria-label="Editar">${ui('edit')}</button></div>
     <div class="stage" style="${skin(s)}"><article class="card tex ${p.mega ? 'mega' : ''}">${sparks(38)}<div class="tag">${glyph(s.id)}</div><div class="ph w-${s.fam}" id="win"></div>
-    <div class="plate"><span class="mx">Mega Shiny EX</span><h2>${esc(p.name)}</h2><p class="sub">${[s.name, FAMILY[s.fam][1]].filter(Boolean).join(' · ')}</p>${stats(p)}<div class="foot"><span>${num(p.num)}</span><span>${fecha}</span></div></div></article></div>
+    <div class="plate"><span class="mx">Mega Shiny EX</span><h2>${esc(p.name)}</h2>${p.desc ? `<p class="line">${esc(p.desc)}</p>` : ''}<p class="sub">${[s.name, FAMILY[s.fam][1]].filter(Boolean).join(' · ')}</p>${stats(p)}<div class="foot"><span>${num(p.num)}</span><span>${fecha}</span></div></div></article></div>
     <div class="sec"><button class="btn megab" id="mg" aria-pressed="${p.mega}">${ui('spark')}<span></span></button></div>
-    <section class="sec"><h3>Fotos en el marco</h3><div class="photos" id="th"></div><div class="two"><button class="btn" id="c1">${ui('cam')}Tomar foto</button><button class="btn" id="c2">${ui('img')}Galería</button></div>
-    <button class="btn bad" id="rm" style="width:100%;margin-top:8px">${ui('trash')}Borrar esta foto</button></section>`;
+    <section class="sec"><h3>Fotos</h3><p class="hint" id="hint"></p><div class="photos" id="th"></div><div class="two"><button class="btn" id="c1">${ui('cam')}Tomar foto</button><button class="btn" id="c2">${ui('img')}Galería</button></div></section>`;
   const save = async () => { try { await DB.put(p); return true; } catch { toast('No pude guardar: falta espacio'); return false; } };
   const paint = () => {
     $('#win').innerHTML = picture(p);
-    $('#th').innerHTML = p.photos.length ? p.photos.map((b, i) => `<button data-ph="${i}" class="${i === p.cover ? 'on' : ''}" aria-label="Poner la foto ${i + 1} en el marco"><img src="${url(b)}" alt=""></button>`).join('') : '<p>Aún no tiene fotos.</p>';
-    $('#rm').hidden = !p.photos.length;
-    $$('[data-ph]').forEach(b => b.onclick = () => show(+b.dataset.ph));
+    $('#th').innerHTML = p.photos.length ? p.photos.map((b, i) => `<button data-ph="${i}" class="${i === p.cover ? 'on' : ''}" aria-label="Foto ${i + 1}${i === p.cover ? ', en la carta' : ''}"><img src="${url(b)}" alt=""></button>`).join('') : '<p>Aún no tiene fotos.</p>';
+    $('#hint').textContent = p.photos.length > 1 ? 'Toca una foto para ponerla en la carta.' : '';
+    $$('[data-ph]').forEach(b => b.onclick = () => choose(+b.dataset.ph));
   };
-  const show = i => { p.cover = i; paint(); return save(); };
-  const step = d => { const n = p.photos.length; if (n > 1) show((p.cover + d + n) % n); };
+  // Cambiar la imagen de la carta siempre pide confirmación
+  const choose = i => {
+    const on = i === p.cover;
+    dlg.className = 'pick-ph';
+    dlg.innerHTML = `<h2>${on ? 'Esta foto está en la carta' : '¿Cambiar la imagen de la carta?'}</h2><img src="${url(p.photos[i])}" alt="Foto elegida">
+      ${on ? '' : '<button class="btn main" id="yes">Cambiar imagen</button>'}<button class="btn" id="no">${on ? 'Cerrar' : 'Cancelar'}</button><button class="btn bad" id="rm">${ui('trash')}Borrar foto</button>`;
+    dlg.showModal();
+    $('#no').onclick = () => dlg.close();
+    const apply = async (photos, cover) => {
+      const old = [p.photos, p.cover];
+      p.photos = photos; p.cover = cover;
+      const ok = await save();
+      if (!ok) [p.photos, p.cover] = old;
+      dlg.close(); paint();
+      return ok;
+    };
+    if (!on) $('#yes').onclick = async () => { if (await apply(p.photos, i)) toast('Imagen de la carta cambiada'); };
+    $('#rm').onclick = () => {
+      if (!confirm('¿Borrar esta foto? No se puede deshacer.')) return;
+      apply(p.photos.filter((_, k) => k !== i), on ? 0 : p.cover - (i < p.cover ? 1 : 0));
+    };
+  };
   paint();
   bindStars(p, save);
   const mg = $('#mg'), label = () => { $('span', mg).textContent = p.mega ? 'Quitar Mega Shiny EX' : 'Activar Mega Shiny EX'; mg.setAttribute('aria-pressed', p.mega); };
@@ -154,27 +173,19 @@ async function detail(id) {
     const bs = await pickPhotos({ camera, multiple: !camera });
     if (!bs.length) return;
     const before = p.photos, cover = p.cover;
-    p.photos = [...before, ...bs]; p.cover = before.length;
+    p.photos = [...before, ...bs]; // la imagen de la carta no cambia sola
     if (!await save()) { p.photos = before; p.cover = cover; }
     if (location.hash === '#/mascota/' + id) paint();
   };
   $('#c1').onclick = () => add(true);
   $('#c2').onclick = () => add(false);
-  $('#rm').onclick = async () => {
-    if (!confirm('¿Borrar la foto que está en el marco?')) return;
-    p.photos.splice(p.cover, 1); p.cover = Math.max(0, p.cover - 1);
-    await save(); paint();
-  };
-  // deslizar cambia la foto; mover inclina la carta y desplaza el brillo
-  const st = $('.stage'), card = $('.card'); let x0 = null;
-  st.onpointerdown = e => { x0 = e.clientX; };
+  // mover el dedo solo inclina la carta y desplaza el brillo
+  const st = $('.stage'), card = $('.card');
   st.onpointermove = e => {
     const r = card.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
     card.style.setProperty('--ry', (x - .5) * 14 + 'deg'); card.style.setProperty('--rx', (.5 - y) * 10 + 'deg'); card.style.setProperty('--gx', x * 100 + '%');
   };
-  const rest = () => { x0 = null; ['--rx', '--ry', '--gx'].forEach(k => card.style.removeProperty(k)); };
-  st.onpointerup = e => { const d = x0 === null ? 0 : e.clientX - x0; rest(); if (Math.abs(d) > 50) step(d < 0 ? 1 : -1); };
-  st.onpointercancel = st.onpointerleave = rest;
+  st.onpointerup = st.onpointercancel = st.onpointerleave = () => ['--rx', '--ry', '--gx'].forEach(k => card.style.removeProperty(k));
 }
 
 async function editor(id, sp) {
@@ -185,6 +196,7 @@ async function editor(id, sp) {
   <form autocomplete="off"><button type="button" class="cam tex" id="cam" aria-label="Tomar foto"></button>
     <div class="two"><button type="button" class="btn" id="b1">${ui('cam')}Tomar foto</button><button type="button" class="btn" id="b2">${ui('img')}Galería</button></div>
     <label class="f" for="nm">Nombre</label><input id="nm" type="text" maxlength="24" value="${esc(d.name)}">
+    <label class="f" for="ds">Descripción breve</label><input id="ds" type="text" maxlength="36" value="${esc(d.desc)}">
     <p class="lbl">Tipo</p><div class="sp pick">${SPECIES.map(s => `<button type="button" class="it" data-s="${s.id}" style="${skin(s)}">${glyph(s.id)}${s.name}</button>`).join('')}</div>
     <p class="lbl">Carácter</p>${stats(d)}
     <button class="btn main">${old ? 'Guardar cambios' : 'Capturar'}</button>
@@ -203,7 +215,7 @@ async function editor(id, sp) {
   $$('[data-s]').forEach(b => b.onclick = () => { d.species = b.dataset.s; paint(); });
   $('form').onsubmit = async e => {
     e.preventDefault();
-    d.name = $('#nm').value.trim();
+    d.name = $('#nm').value.trim(); d.desc = $('#ds').value.trim();
     if (!d.name) { toast('Falta ponerle nombre'); $('#nm').focus(); return; }
     const btn = $('.btn.main'); btn.disabled = true;
     try {

@@ -147,3 +147,7 @@ form .stars button:not(.on) svg{fill:none}
 .dot::after{content:"";position:absolute;top:7px;right:7px;width:11px;height:11px;border-radius:50%;background:#ff3d6e;border:2px solid var(--panel)}
 dialog .cnt{font-size:15px}
 dialog .btn.main{margin-top:0}
+.plate .line{font-size:15px;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hint{color:var(--soft);margin-bottom:8px}
+.hint:empty{display:none}
+.pick-ph img{display:block;width:100%;max-height:44dvh;object-fit:contain;border-radius:14px;margin:14px 0}
