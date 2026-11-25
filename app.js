@@ -28,7 +28,7 @@ const norm = p => {
   const { photo, gallery, ...r } = p;
   r.photos = p.photos || [photo, ...(gallery || [])].filter(Boolean);
   r.cover = Math.min(Math.max(0, p.cover | 0), Math.max(0, r.photos.length - 1));
-  r.mega = p.mega === true; r.fav = p.fav === true; r.friend = lvl(p.friend); r.fight = lvl(p.fight);
+  r.mega = p.mega === true; r.full = p.full === true && !r.mega; r.fav = p.fav === true; r.friend = lvl(p.friend); r.fight = lvl(p.fight);
   return r;
 };
 const DB = {
@@ -95,8 +95,9 @@ const SPARKS = [[2, 68, 21, 1.5], [93, 2, 20, 1.0], [55, 2, 22, 2.4], [78, 98, 1
 const sparks = n => `<div class="sparks" aria-hidden="true">${SPARKS.slice(0, n).map(([x, y, z, d]) => `<i style="left:${x}%;top:${y}%;width:${z}px;height:${z}px;animation-delay:${d}s"></i>`).join('')}</div>`;
 const mini = p => {
   const s = spOf(p.species);
-  return `<div class="cell" data-id="${esc(p.id)}"><button class="pet tex ${p.mega ? 'mega' : ''}" data-go="#/mascota/${esc(p.id)}" style="${skin(s)}">${p.mega ? sparks(9) : ''}<div class="ph w-${s.fam}">${picture(p)}</div><div class="pl"><span><b>${esc(p.name)}</b><small>${num(p.num)}</small></span>${glyph(s.id)}</div></button></div>`;
+  return `<div class="cell" data-id="${esc(p.id)}"><button class="pet tex ${look(p)}" data-go="#/mascota/${esc(p.id)}" style="${skin(s)}">${p.mega ? sparks(9) : ''}<div class="ph w-${s.fam}">${picture(p)}</div><div class="pl"><span><b>${esc(p.name)}</b><small>${num(p.num)}</small></span>${glyph(s.id)}</div></button></div>`;
 };
+const look = p => p.mega ? 'mega' : p.full ? 'full' : '';
 let favOnly = false;
 let listHash = '#/'; // última lista visitada: ahí vuelve la carta
 
@@ -208,7 +209,7 @@ async function home(tab) {
     <div class="count"><span><b>${pets.length}</b> ${pets.length === 1 ? 'mascota' : 'mascotas'}</span><span><b>${got.size}</b> de ${SPECIES.length} tipos</span></div>
     <div class="bar">${SPECIES.map(s => `<i${got.has(s.id) ? ` style="background:${s.color}"` : ''}></i>`).join('')}</div></header>
     <nav class="tabs"><button data-go="#/" class="${tab ? '' : 'on'}">Mi álbum</button><button data-go="#/tipos" class="${tab ? 'on' : ''}">Tipos</button></nav>
-    ${!tab && pets.length > 1 && pets.some(p => p.fav) ? '<p class="hint tip">Mantén presionada una favorita y arrástrala para cambiar su número.</p>' : ''}${body}<button class="fab" data-go="#/nueva">${ui('cam')}Capturar</button>`;
+    ${body}<button class="fab" data-go="#/nueva">${ui('cam')}Capturar</button>`;
   $('#cfg').onclick = settings;
   if (!tab) sortable(pets);
 }
@@ -219,9 +220,9 @@ async function detail(id) {
   const s = spOf(p.species);
   const fecha = new Date(p.created).toLocaleDateString('es-CL');
   app.innerHTML = `<div class="bar2"><button class="round" data-go="${listHash}" aria-label="Volver">${ui('back')}</button><h1></h1><button class="round fv" id="fv">${ui('heart')}</button><button class="round" data-go="#/editar/${esc(p.id)}" aria-label="Editar">${ui('edit')}</button></div>
-    <div class="stage" style="${skin(s)}"><article class="card tex ${p.mega ? 'mega' : ''}">${sparks(38)}<div class="tag">${glyph(s.id)}</div><div class="ph w-${s.fam}" id="win"></div>
+    <div class="stage" style="${skin(s)}"><article class="card tex ${look(p)}">${sparks(38)}<div class="tag">${glyph(s.id)}</div><div class="ph w-${s.fam}" id="win"></div>
     <div class="plate"><span class="mx">Mega Shiny EX</span><h2>${esc(p.name)}</h2>${p.desc ? `<p class="line">${esc(p.desc)}</p>` : ''}<p class="sub">${[s.name, FAMILY[s.fam][1]].filter(Boolean).join(' · ')}</p>${stats(p)}<div class="foot"><span id="nn">${num(p.num)}</span><span>${fecha}</span></div></div></article></div>
-    <div class="sec"><button class="btn megab" id="mg" aria-pressed="${p.mega}">${ui('spark')}<span></span></button></div>
+    <div class="sec two looks"><button class="btn megab" id="mg">${ui('spark')}<span>Mega Shiny EX</span></button><button class="btn fullb" id="fa">${ui('img')}<span>Full Art</span></button></div>
     <section class="sec"><h3>Fotos</h3><p class="hint" id="hint"></p><div class="photos" id="th"></div><div class="two"><button class="btn" id="c1">${ui('cam')}Tomar foto</button><button class="btn" id="c2">${ui('img')}Galería</button></div></section>`;
   const save = async () => { try { await DB.put(p); return true; } catch { toast('No pude guardar: falta espacio'); return false; } };
   const paint = () => {
@@ -264,14 +265,25 @@ async function detail(id) {
     else toast(p.fav ? 'Agregada a favoritas' : 'Quitada de favoritas');
     favUI();
   };
-  const mg = $('#mg'), label = () => { $('span', mg).textContent = p.mega ? 'Quitar Mega Shiny EX' : 'Activar Mega Shiny EX'; mg.setAttribute('aria-pressed', p.mega); };
-  label();
-  mg.onclick = async () => {
-    p.mega = !p.mega;
-    if (!await save()) { p.mega = !p.mega; return; }
-    $('.card').classList.toggle('mega', p.mega); $('.card').classList.toggle('boom', p.mega); label();
-    if (p.mega) { navigator.vibrate?.([40, 30, 40, 30, 160]); scrollTo({ top: 0, behavior: 'smooth' }); }
+  // Mega Shiny EX y Full Art se excluyen: elegir uno apaga el otro
+  const looks = () => {
+    $('#mg').setAttribute('aria-pressed', p.mega); $('#fa').setAttribute('aria-pressed', p.full);
+    $('#mg').setAttribute('aria-label', p.mega ? 'Quitar Mega Shiny EX' : 'Activar Mega Shiny EX');
+    $('#fa').setAttribute('aria-label', p.full ? 'Quitar Full Art' : 'Activar Full Art');
   };
+  looks();
+  const setLook = async k => {
+    const old = [p.mega, p.full], on = !p[k];
+    p.mega = k === 'mega' && on; p.full = k === 'full' && on;
+    if (!await save()) { [p.mega, p.full] = old; return; }
+    const c = $('.card');
+    c.classList.toggle('mega', p.mega); c.classList.toggle('full', p.full);
+    c.classList.remove('boom'); void c.offsetWidth; c.classList.toggle('boom', on);
+    looks();
+    if (on) { navigator.vibrate?.(p.mega ? [40, 30, 40, 30, 160] : [30, 40, 60]); scrollTo({ top: 0, behavior: 'smooth' }); }
+  };
+  $('#mg').onclick = () => setLook('mega');
+  $('#fa').onclick = () => setLook('full');
   const add = async camera => {
     const bs = await pickPhotos({ camera, multiple: !camera });
     if (!bs.length) return;
@@ -286,9 +298,9 @@ async function detail(id) {
   const st = $('.stage'), card = $('.card');
   st.onpointermove = e => {
     const r = card.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
-    card.style.setProperty('--ry', (x - .5) * 14 + 'deg'); card.style.setProperty('--rx', (.5 - y) * 10 + 'deg'); card.style.setProperty('--gx', x * 100 + '%');
+    card.style.setProperty('--ry', (x - .5) * 14 + 'deg'); card.style.setProperty('--rx', (.5 - y) * 10 + 'deg'); card.style.setProperty('--gx', x * 100 + '%'); card.style.setProperty('--gi', Math.min(1, Math.abs(x - .5) * 2.4).toFixed(2));
   };
-  st.onpointerup = st.onpointercancel = st.onpointerleave = () => ['--rx', '--ry', '--gx'].forEach(k => card.style.removeProperty(k));
+  st.onpointerup = st.onpointercancel = st.onpointerleave = () => ['--rx', '--ry', '--gx', '--gi'].forEach(k => card.style.removeProperty(k));
 }
 
 async function editor(id, sp) {
@@ -371,7 +383,7 @@ async function restore(file) {
   const list = pets.map((p, k) => norm({
     id: String(p.id).replace(/[^\w-]/g, ''), num: +p.num || k + 1, species: spOf(p.species).id,
     name: String(p.name).slice(0, 24), desc: String(p.desc || '').slice(0, 300), created: +p.created || Date.now(),
-    cover: p.cover, mega: p.mega, fav: p.fav, friend: p.friend, fight: p.fight,
+    cover: p.cover, mega: p.mega, full: p.full, fav: p.fav, friend: p.friend, fight: p.fight,
     photos: (p.photos || [p.photo, ...(p.gallery || [])]).map(from64).filter(Boolean)
   }));
   if (!list.length || list.some(p => !p.id)) throw new Error('copia');

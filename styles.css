@@ -136,8 +136,8 @@ form .stars button:not(.on) svg{fill:none}
 .mega .tag{background:#fff}
 .mega .stars .on svg{fill:#ffc800}
 .card.boom{animation:boom .9s cubic-bezier(.2,1.2,.4,1)}
-.megab{width:100%;min-height:58px;color:#0b0d12;font:800 20px var(--disp);background:linear-gradient(100deg,#ff9ac4,#ffd08a,#fff08a,#97efb8,#93dfff,#c2b1ff)}
-.megab[aria-pressed=true]{background:var(--panel);color:var(--ink)}
+.megab{min-height:58px;color:#0b0d12;font:800 20px var(--disp);background:linear-gradient(100deg,#ff9ac4,#ffd08a,#fff08a,#97efb8,#93dfff,#c2b1ff)}
+
 @keyframes holo{from{transform:translate(-11%,-8%)}to{transform:translate(11%,8%)}}
 @keyframes glare{from{background-position:130% 0}60%,to{background-position:-40% 0}}
 @keyframes twinkle{0%,100%{transform:scale(0) rotate(0);opacity:0}50%{transform:scale(1) rotate(45deg);opacity:1}}
@@ -160,7 +160,39 @@ dialog .btn.main{margin-top:0}
 .fv[aria-pressed=true]{color:#e5244f}
 .fv[aria-pressed=true] .gl{fill:currentColor}
 @media (prefers-color-scheme:dark){.fv[aria-pressed=true]{color:#ff5c7f}}
-.tip{padding:16px 18px 0;margin:0}
 .favrow{width:100%;justify-content:flex-start;min-height:58px}
 .favrow .gl{color:#e5244f;fill:currentColor}
 .favrow b{margin-left:auto}
+/* elegir estilo: el activo queda marcado */
+.looks{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.looks .btn{min-height:58px;font:800 17px var(--disp);color:#0b0d12;border:3px solid transparent;padding:6px;gap:6px;white-space:nowrap}
+.fullb{background:linear-gradient(135deg,#f4f6f9,#b9c1cb 45%,#ffffff 55%,#a7b0bb)}
+.looks [aria-pressed=true]{border-color:var(--ink);box-shadow:0 0 0 2px var(--bg) inset}
+.looks .btn{position:relative}
+.looks [aria-pressed=true]::after{content:"✓";position:absolute;top:-9px;right:-7px;width:24px;height:24px;border-radius:50%;background:var(--ink);color:var(--bg);font:900 14px/24px sans-serif;text-align:center}
+/* FULL ART: la foto ocupa toda la carta, borde iridiscente suave y letras con contorno blanco */
+.full{background:linear-gradient(125deg,#f6b7cf,#f7d9a8 18%,#f3f0b4 32%,#b9ebcf 48%,#b3dcf3 64%,#cdbff2 80%,#f6b7cf) 0 0/250% 250%}
+.card.full{padding:9px;aspect-ratio:5/7;animation:silver 8s ease-in-out infinite alternate;box-shadow:0 0 0 1px #ffffffb0 inset,0 0 18px #c9b8ff40,0 18px 40px -12px #0b0d1270}
+.card.full .ph,.pet.full .ph{position:absolute;inset:9px;aspect-ratio:auto;border-radius:15px!important;clip-path:none;z-index:0}
+.pet.full{position:relative;display:flex;flex-direction:column;justify-content:flex-end;aspect-ratio:5/7;padding:6px}
+.pet.full .ph{inset:6px;border-radius:11px!important}
+.full .ph .gl{width:52%;height:52%;align-self:start;margin-top:12%}
+.card.full .tag{z-index:1;top:9px;right:9px;border-radius:0 15px 0 20px}
+.card.full .plate,.pet.full .pl{background:none;box-shadow:none;position:relative;z-index:1;color:#0b0d12}
+.card.full .plate{flex:none;margin-top:auto;padding:12px 8px 6px}
+.card.full .plate *,.pet.full .pl *{color:#0b0d12;--o:#fff;text-shadow:2px 0 var(--o),-2px 0 var(--o),0 2px var(--o),0 -2px var(--o),1.5px 1.5px var(--o),-1.5px 1.5px var(--o),1.5px -1.5px var(--o),-1.5px -1.5px var(--o),0 0 6px var(--o)}
+.card.full .plate h2{text-shadow:3px 0 #fff,-3px 0 #fff,0 3px #fff,0 -3px #fff,2px 2px #fff,-2px 2px #fff,2px -2px #fff,-2px -2px #fff,0 0 8px #fff}
+.card.full .stat span,.card.full .sub,.card.full .line,.card.full .foot span{font-weight:700}
+.card.full .stars svg{fill:none;stroke:#0b0d12;stroke-width:1.4;filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 2px #fff)}
+.card.full .stars .on svg{fill:var(--c)}
+.card.full .plate .foot{border-top:0}
+.card.full::after{background-image:linear-gradient(115deg,transparent 28%,#ffffff60 42%,#fff3c890 48%,#d8c8ff70 53%,#bff0ff70 57%,transparent 70%);mix-blend-mode:normal;opacity:calc(.35 + var(--gi,0) * .65);transition:transform .25s,opacity .2s}
+/* Full Art: unos pocos destellos que aparecen al inclinar la carta hacia los lados */
+.card.full .sparks{display:block;position:absolute;inset:0;z-index:2;pointer-events:none;opacity:var(--gi,0);transition:opacity .25s}
+.card.full .sparks i:nth-child(n+11){display:none}
+.pet.full .pl .gl{filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 2px #fff)}
+.pet.full .pl{padding:4px 4px 2px}
+@keyframes silver{from{background-position:0 0}to{background-position:100% 100%}}
+/* Mega Shiny EX: el recuadro deja ver un poco el arcoíris de fondo */
+.card.mega .plate{background:linear-gradient(#ffffffc4,#ffffffde)}
+.pet.mega .pl{background:#ffffffcc}

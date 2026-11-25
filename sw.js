@@ -1,5 +1,5 @@
 // Red primero, caché de respaldo: se actualiza sola y funciona sin internet.
-const C = 'mascodex-v4';
+const C = 'mascodex-v5';
 const FILES = ['./', 'index.html', 'styles.css', 'species.js', 'app.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', e => e.waitUntil(caches.open(C).then(c => c.addAll(FILES)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(caches.keys()
