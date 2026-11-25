@@ -8,8 +8,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           set -eux
-          PL=$(ls -d $ANDROID_HOME/platforms/android-[0-9]* | sort -V | tail -1)/android.jar
-          BT=$(ls -d $ANDROID_HOME/build-tools/[0-9]* | grep -v rc | sort -V | tail -1)
+          PL=$ANDROID_HOME/platforms/android-35/android.jar
+          BT=$ANDROID_HOME/build-tools/35.0.0
           mkdir -p o/c o/d
           $BT/aapt2 compile --dir res -o o/r.zip
           $BT/aapt2 link -I $PL --manifest AndroidManifest.xml --java o/gen -o o/u.apk o/r.zip

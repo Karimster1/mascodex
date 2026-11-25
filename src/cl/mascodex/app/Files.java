@@ -13,7 +13,7 @@ public class Files extends ContentProvider {
     static Uri uri(String name) { return Uri.parse("content://cl.mascodex.app.files/" + Uri.encode(name)); }
     private File file(Uri u) throws FileNotFoundException {
         String n = u.getLastPathSegment();
-        if (n == null || !n.matches("[\w-][\w.-]*")) throw new FileNotFoundException();
+        if (n == null || !n.matches("[A-Za-z0-9_-][A-Za-z0-9_.-]*")) throw new FileNotFoundException();
         return new File(dir(getContext()), n);
     }
     @Override public boolean onCreate() { return true; }
