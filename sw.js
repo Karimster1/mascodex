@@ -1,5 +1,5 @@
 // Red primero, caché de respaldo: se actualiza sola y funciona sin internet.
-const C = 'mascodex-v5';
+const C = 'mascodex-v6';
 const FILES = ['./', 'index.html', 'styles.css', 'species.js', 'app.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', e => e.waitUntil(caches.open(C).then(c => c.addAll(FILES)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(caches.keys()
@@ -7,8 +7,13 @@ self.addEventListener('activate', e => e.waitUntil(caches.keys()
   .then(() => self.clients.claim())));
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
-  e.respondWith(fetch(e.request).then(r => {
+  // Red primero, pero si la señal es mala no se espera más de 3 s: se usa la copia guardada
+  const net = fetch(e.request).then(r => {
     if (r.ok) { const copy = r.clone(); e.waitUntil(caches.open(C).then(c => c.put(e.request, copy))); }
     return r;
-  }).catch(() => caches.match(e.request, { ignoreSearch: true }).then(r => r || Response.error())));
+  });
+  e.waitUntil(net.catch(() => {}));
+  const cached = () => caches.match(e.request, { ignoreSearch: true });
+  const slow = new Promise(ok => setTimeout(ok, 3000)).then(cached);
+  e.respondWith(Promise.race([net, slow.then(r => r || net)]).catch(() => cached().then(r => r || Response.error())));
 });

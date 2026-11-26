@@ -172,7 +172,7 @@ dialog .btn.main{margin-top:0}
 .looks [aria-pressed=true]::after{content:"✓";position:absolute;top:-9px;right:-7px;width:24px;height:24px;border-radius:50%;background:var(--ink);color:var(--bg);font:900 14px/24px sans-serif;text-align:center}
 /* FULL ART: la foto ocupa toda la carta, borde iridiscente suave y letras con contorno blanco */
 .full{background:linear-gradient(125deg,#f6b7cf,#f7d9a8 18%,#f3f0b4 32%,#b9ebcf 48%,#b3dcf3 64%,#cdbff2 80%,#f6b7cf) 0 0/250% 250%}
-.card.full{padding:9px;aspect-ratio:5/7;animation:silver 8s ease-in-out infinite alternate;box-shadow:0 0 0 1px #ffffffb0 inset,0 0 18px #c9b8ff40,0 18px 40px -12px #0b0d1270}
+.card.full{padding:9px;aspect-ratio:5/7;isolation:isolate;box-shadow:0 0 0 1px #ffffffb0 inset,0 0 18px #c9b8ff40,0 18px 40px -12px #0b0d1270}
 .card.full .ph,.pet.full .ph{position:absolute;inset:9px;aspect-ratio:auto;border-radius:15px!important;clip-path:none;z-index:0}
 .pet.full{position:relative;display:flex;flex-direction:column;justify-content:flex-end;aspect-ratio:5/7;padding:6px}
 .pet.full .ph{inset:6px;border-radius:11px!important}
@@ -196,3 +196,7 @@ dialog .btn.main{margin-top:0}
 /* Mega Shiny EX: el recuadro deja ver un poco el arcoíris de fondo */
 .card.mega .plate{background:linear-gradient(#ffffffc4,#ffffffde)}
 .pet.mega .pl{background:#ffffffcc}
+/* el brillo del borde Full Art se mueve en su propia capa (lo mueve la GPU, no repinta la carta) */
+.card.full::before{content:"";position:absolute;z-index:-1;inset:-60%;background:inherit;background-size:100% 100%;animation:holo 8s ease-in-out infinite alternate}
+.card.full .sparks{z-index:2}
+@media (prefers-reduced-motion:reduce){.card.full::before{animation:none}}

@@ -37,6 +37,8 @@ const DB = {
   put: p => tx('readwrite', s => s.put(p)),
   putMany: ps => tx('readwrite', s => { ps.forEach(p => s.put(p)); }),
   del: id => tx('readwrite', s => s.delete(id)),
+  // lee y escribe en la misma transacción, para no pisar cambios hechos en otra pantalla
+  patch: (id, fn) => tx('readwrite', s => { const q = s.get(id); q.onsuccess = () => { const v = q.result && fn(q.result); if (v) s.put(v); }; }),
 };
 
 // Deja la mascota en la posición pos (desde 1) y numera el álbum de corrido
@@ -75,7 +77,43 @@ function pickPhotos({ camera = false, multiple = false } = {}) {
     i.click();
   });
 }
-const picture = p => p.photos.length ? `<img src="${url(p.photos[p.cover])}" alt="">` : glyph(p.species);
+/* Miniaturas: el álbum muestra una copia chica de la foto de la carta (lado corto de 600 px)
+   en vez de la foto completa. Se crean en segundo plano y se guardan con la mascota. */
+const tkey = p => { const b = p.photos[p.cover]; return b ? b.size + '/' + p.cover : ''; };
+const hasThumb = p => p.thumb && p.thumbKey === tkey(p);
+async function makeThumb(blob, side = 600) {
+  const bmp = await createImageBitmap(blob);
+  const k = Math.min(1, side / Math.min(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); bmp.close();
+  return new Promise((ok, no) => c.toBlob(b => b ? ok(b) : no(new Error('miniatura')), 'image/jpeg', .82));
+}
+const thumbQueue = new Set();
+let thumbing = false;
+function ensureThumbs(pets) {
+  pets.forEach(p => { if (p.photos.length && !hasThumb(p)) thumbQueue.add(p.id); });
+  if (thumbing || !thumbQueue.size) return;
+  thumbing = true;
+  (async () => {
+    while (thumbQueue.size) {
+      const [id] = thumbQueue; thumbQueue.delete(id);
+      try {
+        const p = await DB.get(id);
+        if (!p || !p.photos.length || hasThumb(p)) continue;
+        const key = tkey(p), t = await makeThumb(p.photos[p.cover]);
+        await DB.patch(id, r => { if (tkey(norm(r)) !== key) return null; r.thumb = t; r.thumbKey = key; return r; });
+        const img = document.querySelector(`.cell[data-id="${CSS.escape(id)}"] .ph img`);
+        if (img) img.src = url(t);
+      } catch (e) { console.warn('miniatura', e); }
+      await new Promise(r => setTimeout(r, 30)); // deja respirar a la interfaz
+    }
+    thumbing = false;
+  })();
+}
+const picture = (p, small) => p.photos.length
+  ? `<img src="${url(small && hasThumb(p) ? p.thumb : p.photos[p.cover])}" alt=""${small ? ' loading="lazy" decoding="async"' : ''}>`
+  : glyph(p.species);
 const num = n => 'N.º ' + String(n).padStart(3, '0');
 const skin = s => `--c:${s.color};--pat:${FAMILY[s.fam][2].replace(/"/g, '&quot;')}`;
 const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l3 7 7.500.600-5.700 5 1.700 7.400L12 18l-6.500 4 1.700-7.400-5.700-5L9 9z"/></svg>';
@@ -95,22 +133,28 @@ const SPARKS = [[2, 68, 21, 1.5], [93, 2, 20, 1.0], [55, 2, 22, 2.4], [78, 98, 1
 const sparks = n => `<div class="sparks" aria-hidden="true">${SPARKS.slice(0, n).map(([x, y, z, d]) => `<i style="left:${x}%;top:${y}%;width:${z}px;height:${z}px;animation-delay:${d}s"></i>`).join('')}</div>`;
 const mini = p => {
   const s = spOf(p.species);
-  return `<div class="cell" data-id="${esc(p.id)}"><button class="pet tex ${look(p)}" data-go="#/mascota/${esc(p.id)}" style="${skin(s)}">${p.mega ? sparks(9) : ''}<div class="ph w-${s.fam}">${picture(p)}</div><div class="pl"><span><b>${esc(p.name)}</b><small>${num(p.num)}</small></span>${glyph(s.id)}</div></button></div>`;
+  return `<div class="cell" data-id="${esc(p.id)}"><button class="pet tex ${look(p)}" data-go="#/mascota/${esc(p.id)}" style="${skin(s)}">${p.mega ? sparks(9) : ''}<div class="ph w-${s.fam}">${picture(p, true)}</div><div class="pl"><span><b>${esc(p.name)}</b><small>${num(p.num)}</small></span>${glyph(s.id)}</div></button></div>`;
 };
 const look = p => p.mega ? 'mega' : p.full ? 'full' : '';
 let favOnly = false;
 let listHash = '#/'; // última lista visitada: ahí vuelve la carta
+let gen = 0; // cada render sube el número; una pantalla que termina tarde no se dibuja
+const stale = g => g !== gen;
 
 /* ---------- Pantallas ---------- */
 async function typeList(sp) {
+  const g = gen;
   const favs = sp === 'favoritas', s = favs ? { name: 'Favoritas' } : SPECIES.find(x => x.id === sp);
   if (!s) return go('#/tipos');
-  const of = (await DB.all()).filter(p => favs ? p.fav : p.species === sp), pets = favOnly && !favs ? of.filter(p => p.fav) : of;
+  const all = await DB.all();
+  if (stale(g)) return;
+  const of = all.filter(p => favs ? p.fav : p.species === sp), pets = favOnly && !favs ? of.filter(p => p.fav) : of;
   const empty = favs ? ['Aún no tienes favoritas', 'Abre una carta y toca el corazón.'] : of.length ? ['Ninguna favorita aquí', 'Abre una carta y toca el corazón.'] : ['Aún no tienes ninguna', 'Captura la primera y aparecerá aquí.'];
   app.innerHTML = `<div class="bar2"><button class="round" data-go="#/tipos" aria-label="Volver a Tipos">${ui('back')}</button><h1>${s.name}</h1><span class="cnt">${pets.length} ${pets.length === 1 ? 'carta' : 'cartas'}</span>${favs ? '' : `<button class="round fv" id="ff" aria-label="Ver solo favoritas" aria-pressed="${favOnly}">${ui('heart')}</button>`}</div>
     ${pets.length ? `<div class="grid">${pets.map(mini).join('')}</div>` : `<div class="empty">${favs ? ui('heart') : glyph(sp)}<h2>${empty[0]}</h2><p>${empty[1]}</p></div>`}
     ${favs ? '' : `<button class="fab" data-go="#/nueva/${sp}">${ui('cam')}Capturar</button>`}`;
   if (!favs) $('#ff').onclick = () => { favOnly = !favOnly; render(); };
+  ensureThumbs(pets);
 }
 
 /* Arrastrar favoritas dentro del álbum. Se reordena con CSS order para no sacar del DOM
@@ -191,7 +235,9 @@ function sortable(pets) {
 }
 
 async function home(tab) {
-  const pets = await DB.all(), got = new Set(pets.map(p => p.species));
+  const g = gen, pets = await DB.all();
+  if (stale(g)) return;
+  const got = new Set(pets.map(p => p.species));
   let body;
   favOnly = false;
   if (tab === 'tipos') {
@@ -211,11 +257,12 @@ async function home(tab) {
     <nav class="tabs"><button data-go="#/" class="${tab ? '' : 'on'}">Mi álbum</button><button data-go="#/tipos" class="${tab ? 'on' : ''}">Tipos</button></nav>
     ${body}<button class="fab" data-go="#/nueva">${ui('cam')}Capturar</button>`;
   $('#cfg').onclick = settings;
-  if (!tab) sortable(pets);
+  if (!tab) { sortable(pets); ensureThumbs(pets); }
 }
 
 async function detail(id) {
-  const p = await DB.get(id);
+  const g = gen, p = await DB.get(id);
+  if (stale(g)) return;
   if (!p) return go('#/');
   const s = spOf(p.species);
   const fecha = new Date(p.created).toLocaleDateString('es-CL');
@@ -227,7 +274,7 @@ async function detail(id) {
   const save = async () => { try { await DB.put(p); return true; } catch { toast('No pude guardar: falta espacio'); return false; } };
   const paint = () => {
     $('#win').innerHTML = picture(p);
-    $('#th').innerHTML = p.photos.length ? p.photos.map((b, i) => `<button data-ph="${i}" class="${i === p.cover ? 'on' : ''}" aria-label="Foto ${i + 1}${i === p.cover ? ', en la carta' : ''}"><img src="${url(b)}" alt=""></button>`).join('') : '<p>Aún no tiene fotos.</p>';
+    $('#th').innerHTML = p.photos.length ? p.photos.map((b, i) => `<button data-ph="${i}" class="${i === p.cover ? 'on' : ''}" aria-label="Foto ${i + 1}${i === p.cover ? ', en la carta' : ''}"><img src="${url(b)}" alt="" loading="lazy" decoding="async"></button>`).join('') : '<p>Aún no tiene fotos.</p>';
     $('#hint').textContent = p.photos.length > 1 ? 'Toca una foto para ponerla en la carta.' : '';
     $$('[data-ph]').forEach(b => b.onclick = () => choose(+b.dataset.ph));
   };
@@ -296,15 +343,21 @@ async function detail(id) {
   $('#c2').onclick = () => add(false);
   // mover el dedo solo inclina la carta y desplaza el brillo
   const st = $('.stage'), card = $('.card');
+  let tilt = 0, last = null;
   st.onpointermove = e => {
+    last = e;
+    if (!tilt) tilt = requestAnimationFrame(() => { tilt = 0; lean(last); });
+  };
+  const lean = e => {
     const r = card.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
     card.style.setProperty('--ry', (x - .5) * 14 + 'deg'); card.style.setProperty('--rx', (.5 - y) * 10 + 'deg'); card.style.setProperty('--gx', x * 100 + '%'); card.style.setProperty('--gi', Math.min(1, Math.abs(x - .5) * 2.4).toFixed(2));
   };
-  st.onpointerup = st.onpointercancel = st.onpointerleave = () => ['--rx', '--ry', '--gx', '--gi'].forEach(k => card.style.removeProperty(k));
+  st.onpointerup = st.onpointercancel = st.onpointerleave = () => { cancelAnimationFrame(tilt); tilt = 0; ['--rx', '--ry', '--gx', '--gi'].forEach(k => card.style.removeProperty(k)); };
 }
 
 async function editor(id, sp) {
-  const old = id && await DB.get(id);
+  const g = gen, old = id && await DB.get(id);
+  if (stale(g)) return;
   if (id && !old) return go('#/');
   const d = old ? { ...old, photos: [...old.photos] } : norm({ id: crypto.randomUUID(), species: spOf(sp || 'perro').id, name: '', desc: '', photos: [], created: Date.now() });
   app.innerHTML = `<div class="bar2"><button class="round" data-go="${old ? '#/mascota/' + esc(id) : listHash}" aria-label="Volver">${ui('back')}</button><h1>${old ? 'Editar mascota' : 'Nueva mascota'}</h1></div>
@@ -373,7 +426,7 @@ const copied = () => { localStorage.setItem('copia', Date.now()); $('#cfg')?.cla
 // Se arma por partes para no juntar todas las fotos en un solo texto gigante
 async function makeBackup() {
   const pets = await DB.all(), parts = ['{"app":"mascodex","v":2,"pets":['];
-  for (const [k, p] of pets.entries()) parts.push((k ? ',' : '') + JSON.stringify({ ...p, photos: await Promise.all(p.photos.map(to64)) }));
+  for (const [k, p] of pets.entries()) parts.push((k ? ',' : '') + JSON.stringify({ ...p, thumb: undefined, thumbKey: undefined, photos: await Promise.all(p.photos.map(to64)) }));
   parts.push(']}');
   // .txt porque Android no permite compartir archivos .json desde el navegador
   return { n: pets.length, file: new File(parts, `MascoDex-copia-${new Date().toLocaleDateString('sv')}.txt`, { type: 'text/plain' }) };
@@ -435,6 +488,7 @@ async function settings() {
 /* ---------- Navegación ---------- */
 document.addEventListener('click', e => { const b = e.target.closest('[data-go]'); if (b) go(b.dataset.go); });
 async function render() {
+  const g = ++gen;
   const [, a = '', id] = location.hash.split('/');
   if (dlg.open) dlg.close();
   const prev = urls; urls = [];
@@ -444,9 +498,20 @@ async function render() {
     else if (a === 'tipo') { listHash = '#/tipo/' + (id === 'favoritas' ? id : spOf(id).id); await typeList(id); }
     else if (a === 'editar') await editor(id);
     else { listHash = a === 'tipos' ? '#/tipos' : '#/'; await home(a === 'tipos' ? 'tipos' : ''); }
-  } catch (e) { console.error(e); toast('Algo falló al abrir el álbum'); }
+  } catch (e) { console.error(e); if (!stale(g)) toast('Algo falló al abrir el álbum'); }
   prev.forEach(u => URL.revokeObjectURL(u));
 }
-addEventListener('hashchange', () => { $('#toast').classList.remove('on'); scrollTo(0, 0); render(); });
+// cada lista recuerda hasta dónde se había bajado; la carta y el editor parten arriba
+const scrollMem = {};
+let here = location.hash || '#/';
+addEventListener('scroll', () => { scrollMem[here] = scrollY; }, { passive: true });
+const isList = h => h === '#/' || h === '' || h === '#/tipos' || h.startsWith('#/tipo/');
+addEventListener('hashchange', async () => {
+  $('#toast').classList.remove('on');
+  here = location.hash || '#/';
+  const y = isList(here) ? scrollMem[here] || 0 : 0, h = here;
+  await render();
+  if (h === here) scrollTo(0, y);
+});
 render();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
